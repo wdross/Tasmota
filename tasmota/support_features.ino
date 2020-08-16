@@ -595,7 +595,9 @@ void GetFeatures(void)
 #if defined(USE_ENERGY_SENSOR) && defined(USE_IEM3000)
   feature6 |= 0x00200000;  // xnrg_16_iem3000.ino
 #endif
-//  feature6 |= 0x00400000;
+#if defined(USE_I2C) && defined(USE_SEESAW_SOIL)
+  feature6 |= 0x00400000;  // xsns_76_seesaw_soil.ino
+#endif
 //  feature6 |= 0x00800000;
 
 //  feature6 |= 0x01000000;
