@@ -704,7 +704,10 @@ void HAssAnnounceSensors(void)
       }
       for (auto sensor : root)
       {
-        const char *sensorname = sensor.key;
+        char sensorname[20];
+        strlcpy(sensorname, sensor.key,sizeof(sensorname));
+        NoAlNumToUnderscore(sensorname, sensorname); // ensure only AlphaNumeric present to avoid topic name issues
+
         JsonObject &sensors = sensor.value.as<JsonObject>();
         if (!sensors.success())
         {
