@@ -35,38 +35,55 @@
 #define SEESAW_SOIL_MAX_SENSORS    4
 #define SEESAW_SOIL_START_ADDRESS  0x36
 
-const char ssname[] = "seesaw soil";
+const char ssname[] = "seesaw_soil"; // spaces not allowed for Homeassistant integration/mqtt topics
 uint8_t count  = 0;
 
 struct {
   Adafruit_seesaw *ss; // instance pointer
-  uint16_t capacitance;
-  float    temperature = NAN;
-  uint8_t  address;
+  float   moisture;
+  float   temperature;
+  uint8_t address;
 } soil_sensors[SEESAW_SOIL_MAX_SENSORS];
+
+// Used to convert capacitance into a moisture.
+// From observation, an un-touched, try reading is in the low 330's
+// Appears to be a 10-bit device, readings close to 1020
+// So let's make a scale that converts those (aparent) facts into a percentage
+#define MAX_CAPACITANCE 1023.0f
+#define MIN_CAPACITANCE 330
+#define CAP_TO_MOIST(c) ((max((int)(c),MIN_CAPACITANCE)-MIN_CAPACITANCE)/(MAX_CAPACITANCE-MIN_CAPACITANCE))
 
 /********************************************************************************************/
 
 void SEESAW_SOILDetect(void) {
-  for (uint8_t i = 0; i < SEESAW_SOIL_MAX_SENSORS; i++) {
-     if (!I2cSetDevice(SEESAW_SOIL_START_ADDRESS + i)) { continue; }
+  Adafruit_seesaw *SSptr=0;
 
-    if (!soil_sensors[count].ss) // don't have an object,
-      soil_sensors[count].ss = new Adafruit_seesaw(); // allocate one
-    if (soil_sensors[count].ss->begin(SEESAW_SOIL_START_ADDRESS + i)) {
-      soil_sensors[count].address = SEESAW_SOIL_START_ADDRESS + i;
+  for (uint8_t i = 0; i < SEESAW_SOIL_MAX_SENSORS; i++) {
+    int addr = SEESAW_SOIL_START_ADDRESS + i;
+    if (!I2cSetDevice(addr)) { continue; }
+
+    if (!SSptr) { // don't have an object,
+      SSptr = new Adafruit_seesaw(); // allocate one
+    }
+    if (SSptr->begin(addr)) {
+      soil_sensors[count].ss = SSptr; // save copy of pointer
+      SSptr = 0; // mark that we took it
+      soil_sensors[count].address = addr;
+      soil_sensors[count].temperature = NAN;
+      soil_sensors[count].moisture = NAN;
       I2cSetActiveFound(soil_sensors[count].address, ssname);
       count++;
     }
   }
-  if (soil_sensors[count].address == 0)
-    delete soil_sensors[count].ss; // used object for detection, didn't find anything so we don't need this object
+  if (SSptr) {
+    delete SSptr; // used object for detection, didn't find anything so we don't need this object
+  }
 }
 
 void SEESAW_SOILEverySecond(void) {
   for (uint32_t i = 0; i < count; i++) {
     soil_sensors[i].temperature = ConvertTemp(soil_sensors[i].ss->getTemp());
-    soil_sensors[i].capacitance = soil_sensors[i].ss->touchRead(0);
+    soil_sensors[i].moisture = CAP_TO_MOIST(soil_sensors[i].ss->touchRead(0)); // convert 10-bit value to percentage
   }
 }
 
@@ -78,12 +95,12 @@ void SEESAW_SOILShow(bool json) {
     char sensor_name[22];
     strlcpy(sensor_name, ssname, sizeof(sensor_name));
     if (count > 1) {
-      snprintf_P(sensor_name, sizeof(sensor_name), PSTR("%s%c%02X"), sensor_name, IndexSeparator(), soil_sensors[i].address); // SEESAW_SOIL-18, SEESAW_SOIL-1A  etc.
+      snprintf_P(sensor_name, sizeof(sensor_name), PSTR("%s%c%2X"), sensor_name, IndexSeparator(), soil_sensors[i].address); // SEESAW_SOIL-18, SEESAW_SOIL-1A  etc.
     }
 
     if (json) {
       ResponseAppend_P(JSON_SNS_TEMP, sensor_name, temperature);
-      ResponseAppend_P(PSTR(",\"" D_JSON_MOISTURE "\":%u"),soil_sensors[i].capacitance);
+      ResponseAppend_P(JSON_SNS_MOISTURE, sensor_name, uint16_t(soil_sensors[i].moisture*100));
       if ((0 == tele_period) && (0 == i)) {
 #ifdef USE_DOMOTICZ
         DomoticzSensor(DZ_TEMP, temperature);
@@ -94,11 +111,11 @@ void SEESAW_SOILShow(bool json) {
       }
 #ifdef USE_WEBSERVER
     } else {
-      WSContentSend_PD(HTTP_SNS_MOISTURE, ssname, soil_sensors[i].capacitance);
+      WSContentSend_PD(HTTP_SNS_MOISTURE, sensor_name, uint16_t(soil_sensors[i].moisture*100)); // web page formats as integer (%d) percent
       WSContentSend_PD(HTTP_SNS_TEMP, sensor_name, temperature, TempUnit());
 #endif  // USE_WEBSERVER
     }
-  }
+  } // for each sensor connected
 }
 
 /*********************************************************************************************\
