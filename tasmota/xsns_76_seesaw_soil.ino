@@ -40,7 +40,7 @@ uint8_t count  = 0;
 
 struct {
   Adafruit_seesaw *ss; // instance pointer
-  float   moisture;
+  uint16_t capacitance;
   float   temperature;
   uint8_t address;
 } soil_sensors[SEESAW_SOIL_MAX_SENSORS];
@@ -70,7 +70,7 @@ void SEESAW_SOILDetect(void) {
       SSptr = 0; // mark that we took it
       soil_sensors[count].address = addr;
       soil_sensors[count].temperature = NAN;
-      soil_sensors[count].moisture = NAN;
+      soil_sensors[count].capacitance = 0;
       I2cSetActiveFound(soil_sensors[count].address, ssname);
       count++;
     }
@@ -83,7 +83,7 @@ void SEESAW_SOILDetect(void) {
 void SEESAW_SOILEverySecond(void) {
   for (uint32_t i = 0; i < count; i++) {
     soil_sensors[i].temperature = ConvertTemp(soil_sensors[i].ss->getTemp());
-    soil_sensors[i].moisture = CAP_TO_MOIST(soil_sensors[i].ss->touchRead(0)); // convert 10-bit value to percentage
+    soil_sensors[i].capacitance = soil_sensors[i].ss->touchRead(0);
   }
 }
 
@@ -100,7 +100,7 @@ void SEESAW_SOILShow(bool json) {
 
     if (json) {
       ResponseAppend_P(JSON_SNS_TEMP, sensor_name, temperature);
-      ResponseAppend_P(JSON_SNS_MOISTURE, sensor_name, uint16_t(soil_sensors[i].moisture*100));
+      ResponseAppend_P(JSON_SNS_MOISTURE, sensor_name, uint16_t(CAP_TO_MOIST(soil_sensors[i].capacitance)*100));
       if ((0 == tele_period) && (0 == i)) {
 #ifdef USE_DOMOTICZ
         DomoticzSensor(DZ_TEMP, temperature);
@@ -111,7 +111,8 @@ void SEESAW_SOILShow(bool json) {
       }
 #ifdef USE_WEBSERVER
     } else {
-      WSContentSend_PD(HTTP_SNS_MOISTURE, sensor_name, uint16_t(soil_sensors[i].moisture*100)); // web page formats as integer (%d) percent
+      WSContentSend_PD(HTTP_SNS_ANALOG, sensor_name, 0, soil_sensors[i].capacitance); // dump raw value
+      WSContentSend_PD(HTTP_SNS_MOISTURE, sensor_name, uint16_t(CAP_TO_MOIST(soil_sensors[i].capacitance)*100)); // web page formats as integer (%d) percent
       WSContentSend_PD(HTTP_SNS_TEMP, sensor_name, temperature, TempUnit());
 #endif  // USE_WEBSERVER
     }
